@@ -1,7 +1,7 @@
 <!-- markdownlint-disable MD033 MD041 -->
 
 <p align="center">
-  <img src="" width="160" height="160" alt="Krypton" />
+  <img src="Krypton.png" width="160" height="160" alt="Krypton" />
 </p>
 
 <div align="center">
