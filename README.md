@@ -82,8 +82,34 @@ go build -o krypton.exe .
 - 模板文件：`example.config.toml`
 
 更多配置说明请查看：
-- `docs/en_us/config.md`
-- `docs/zh_cn/config.md`
+- [English Config](docs/en_us/config.md)
+- [中文配置](docs/zh_cn/config.md)
+
+## 文档索引
+
+English:
+- [Quick Start](docs/en_us/quickstart.md)
+- [Configuration](docs/en_us/config.md)
+- [Health Check](docs/en_us/health_check.md)
+- [Trigger Script](docs/en_us/trigger.md)
+- [Retry Policy](docs/en_us/retry.md)
+- [Admin API](docs/en_us/admin_api.md)
+- [Logging](docs/en_us/logging.md)
+- [Architecture](docs/en_us/architecture.md)
+- [Operations](docs/en_us/operations.md)
+- [FAQ](docs/en_us/faq.md)
+
+中文：
+- [快速开始](docs/zh_cn/quickstart.md)
+- [配置说明](docs/zh_cn/config.md)
+- [健康检查](docs/zh_cn/health_check.md)
+- [触发脚本](docs/zh_cn/trigger.md)
+- [重试策略](docs/zh_cn/retry.md)
+- [管理 API](docs/zh_cn/admin_api.md)
+- [日志](docs/zh_cn/logging.md)
+- [架构](docs/zh_cn/architecture.md)
+- [运维](docs/zh_cn/operations.md)
+- [常见问题](docs/zh_cn/faq.md)
 
 ## 运行参数
 
@@ -91,7 +117,7 @@ go build -o krypton.exe .
 
 ## 支持
 
-- 问题反馈：GitHub Issues
+- 问题反馈：[GitHub Issues](https://github.com/AmethystDev-Labs/Krypton/issues)
 
 ## 贡献
 
