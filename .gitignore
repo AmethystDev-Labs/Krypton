@@ -1,0 +1,16 @@
+.gocache/
+.gotelemetry/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.log
+/krypton
+/krypton.exe
+/.vscode/
+/.idea/
+config.toml
+devplan.txt
