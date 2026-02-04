@@ -45,13 +45,14 @@ jobs:
             ext=".exe"
           fi
           pkg="krypton_${{ matrix.goos }}_${{ matrix.goarch }}"
-          staging="dist/${pkg}"
+          staging="dist/${pkg}_package"
+          rm -rf "${staging}"
           mkdir -p "${staging}"
-          cp "dist/${pkg}${ext}" "${staging}/"
+          cp "dist/${pkg}${ext}" "${staging}/krypton${ext}"
           cp "example.config.toml" "${staging}/"
           cp "example.config.toml" "${staging}/config.toml"
           cp -R "scripts" "${staging}/"
-          (cd dist && zip -r "${pkg}.zip" "${pkg}")
+          (cd "${staging}" && zip -r "../${pkg}.zip" .)
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
