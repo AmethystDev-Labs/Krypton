@@ -49,10 +49,16 @@ type RetryConfig struct {
 }
 
 type StrategyConfig struct {
-	MinWeight        int32    `toml:"min_weight"`
-	PenaltyFactor    float64  `toml:"penalty_factor"`
-	RecoveryInterval Duration `toml:"recovery_interval"`
-	HashShard        bool     `toml:"hash_shard"`
+	MinWeight               int32    `toml:"min_weight"`
+	PenaltyFactor           float64  `toml:"penalty_factor"`
+	RecoveryInterval        Duration `toml:"recovery_interval"`
+	MaxPenaltyPerSecond     int32    `toml:"max_penalty_per_second"`
+	ConnFactorEnabled       bool     `toml:"conn_factor_enabled"`
+	ConnFactorSmoothing     int32    `toml:"conn_factor_smoothing"`
+	ConnFactorSlope         float64  `toml:"conn_factor_slope"`
+	ConnFactorSyncThreshold float64  `toml:"conn_factor_sync_threshold"`
+	ConnFactorEMAAlpha      float64  `toml:"conn_factor_ema_alpha"`
+	HashShard               bool     `toml:"hash_shard"`
 }
 
 type HealthCheckConfig struct {
@@ -138,6 +144,21 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Strategy.MinWeight <= 0 {
 		cfg.Strategy.MinWeight = 1
+	}
+	if cfg.Strategy.MaxPenaltyPerSecond < 0 {
+		cfg.Strategy.MaxPenaltyPerSecond = 0
+	}
+	if cfg.Strategy.ConnFactorSmoothing < 0 {
+		cfg.Strategy.ConnFactorSmoothing = 0
+	}
+	if cfg.Strategy.ConnFactorSlope <= 0 {
+		cfg.Strategy.ConnFactorSlope = 0.4
+	}
+	if cfg.Strategy.ConnFactorSyncThreshold <= 0 {
+		cfg.Strategy.ConnFactorSyncThreshold = 0.5
+	}
+	if cfg.Strategy.ConnFactorEMAAlpha <= 0 || cfg.Strategy.ConnFactorEMAAlpha > 1 {
+		cfg.Strategy.ConnFactorEMAAlpha = 0.2
 	}
 	if cfg.Strategy.RecoveryInterval.Duration <= 0 {
 		cfg.Strategy.RecoveryInterval = Duration{Duration: 10 * time.Second}

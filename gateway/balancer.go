@@ -22,6 +22,9 @@ type Node struct {
 	passiveScore    int32
 	activeScore     int32
 	checkScript     string
+	penaltyWindow   uint64
+	inflight        int32
+	connDeltaBits   uint64
 }
 
 type Bucket struct {
@@ -30,12 +33,14 @@ type Bucket struct {
 }
 
 type Balancer struct {
-	buckets []*Bucket
-	nodeMap sync.Map
-	config  *Config
-	rand    *rand.Rand
-	randMu  sync.Mutex
-	cfgMu   sync.RWMutex
+	buckets       []*Bucket
+	nodeMap       sync.Map
+	config        *Config
+	rand          *rand.Rand
+	randMu        sync.Mutex
+	cfgMu         sync.RWMutex
+	totalInflight int64
+	nodeCount     int32
 }
 
 func NewBalancer(cfg *Config) (*Balancer, error) {
@@ -58,6 +63,7 @@ func NewBalancer(cfg *Config) (*Balancer, error) {
 		b.buckets[idx].nodes = append(b.buckets[idx].nodes, node)
 		b.nodeMap.Store(nc.Address, node)
 	}
+	b.nodeCount = int32(len(cfg.Nodes))
 	return b, nil
 }
 
@@ -136,8 +142,17 @@ func (n *Node) UpdateEffectiveWeight(delta int32, min int32) {
 	}
 }
 
-func (n *Node) SyncWeight(passiveScore float64, activeScore float64) {
+func (n *Node) SyncWeight(passiveScore float64, activeScore float64, connDelta float64) {
 	targetScore := math.Min(passiveScore, activeScore)
+	if connDelta != 0 {
+		targetScore += connDelta
+		if targetScore < 0 {
+			targetScore = 0
+		}
+		if targetScore > 100 {
+			targetScore = 100
+		}
+	}
 	current := atomic.LoadInt32(&n.effectiveWeight)
 	target := int32(float64(n.InitialWeight) * (targetScore / 100.0))
 	if target < current {
@@ -154,7 +169,13 @@ func (n *Node) SyncWeight(passiveScore float64, activeScore float64) {
 	}
 }
 
-func (n *Node) UpdatePassiveScore(delta int32) {
+func (n *Node) UpdatePassiveScore(delta int32, maxPenaltyPerSecond int32) {
+	if delta < 0 {
+		delta = n.limitPenalty(delta, maxPenaltyPerSecond)
+		if delta == 0 {
+			return
+		}
+	}
 	for {
 		old := atomic.LoadInt32(&n.passiveScore)
 		next := old + delta
@@ -166,6 +187,35 @@ func (n *Node) UpdatePassiveScore(delta int32) {
 		}
 		if atomic.CompareAndSwapInt32(&n.passiveScore, old, next) {
 			return
+		}
+	}
+}
+
+func (n *Node) limitPenalty(delta int32, maxPenaltyPerSecond int32) int32 {
+	if delta >= 0 || maxPenaltyPerSecond <= 0 {
+		return delta
+	}
+	now := uint64(time.Now().Unix())
+	for {
+		state := atomic.LoadUint64(&n.penaltyWindow)
+		sec := state >> 32
+		used := int32(state & 0xffffffff)
+		if sec != now {
+			sec = now
+			used = 0
+		}
+		remaining := maxPenaltyPerSecond - used
+		if remaining <= 0 {
+			return 0
+		}
+		want := -delta
+		if want > remaining {
+			want = remaining
+		}
+		newUsed := used + want
+		newState := (sec << 32) | uint64(uint32(newUsed))
+		if atomic.CompareAndSwapUint64(&n.penaltyWindow, state, newState) {
+			return -want
 		}
 	}
 }
@@ -198,6 +248,14 @@ func (n *Node) ActiveScore() float64 {
 	return float64(atomic.LoadInt32(&n.activeScore))
 }
 
+func (n *Node) ConnDelta() float64 {
+	return math.Float64frombits(atomic.LoadUint64(&n.connDeltaBits))
+}
+
+func (n *Node) SetConnDelta(delta float64) {
+	atomic.StoreUint64(&n.connDeltaBits, math.Float64bits(delta))
+}
+
 func (b *Balancer) ApplyConfig(next *Config) error {
 	b.cfgMu.Lock()
 	defer b.cfgMu.Unlock()
@@ -211,5 +269,86 @@ func (b *Balancer) ApplyConfig(next *Config) error {
 	// Node list reload not supported yet; keep current nodes.
 
 	setTransportConfig(b.config)
+	b.updateConnFactorLocked()
 	return nil
+}
+
+func (b *Balancer) adjustConn(node *Node, delta int32) {
+	if node == nil || delta == 0 {
+		return
+	}
+	atomic.AddInt32(&node.inflight, delta)
+	atomic.AddInt64(&b.totalInflight, int64(delta))
+	b.updateConnFactor()
+}
+
+func (b *Balancer) updateConnFactor() {
+	b.cfgMu.RLock()
+	defer b.cfgMu.RUnlock()
+	b.updateConnFactorLocked()
+}
+
+func (b *Balancer) updateConnFactorLocked() {
+	st := b.config.Strategy
+	if !st.ConnFactorEnabled {
+		b.resetConnFactorLocked()
+		return
+	}
+	nodeCount := float64(b.nodeCount)
+	if nodeCount <= 0 {
+		return
+	}
+	total := float64(atomic.LoadInt64(&b.totalInflight))
+	smoothing := float64(st.ConnFactorSmoothing)
+	slope := st.ConnFactorSlope
+	threshold := st.ConnFactorSyncThreshold
+	alpha := st.ConnFactorEMAAlpha
+	if slope <= 0 {
+		slope = 0.4
+	}
+	if alpha <= 0 || alpha > 1 {
+		alpha = 0.2
+	}
+	if threshold < 0 {
+		threshold = 0
+	}
+	denom := total + smoothing
+	targetShare := 1.0 / nodeCount
+	b.ForEachNode(func(n *Node) {
+		var delta float64
+		if denom <= 0 {
+			delta = 0
+		} else {
+			ci := float64(atomic.LoadInt32(&n.inflight))
+			share := (ci + (smoothing / nodeCount)) / denom
+			delta = clampFloat(10*(targetShare-share)/slope, -10, 10)
+		}
+		last := n.ConnDelta()
+		if math.Abs(delta-last) <= threshold {
+			return
+		}
+		next := last*(1-alpha) + delta*alpha
+		n.SetConnDelta(next)
+		n.SyncWeight(n.PassiveScore(), n.ActiveScore(), next)
+	})
+}
+
+func (b *Balancer) resetConnFactorLocked() {
+	b.ForEachNode(func(n *Node) {
+		if n.ConnDelta() == 0 {
+			return
+		}
+		n.SetConnDelta(0)
+		n.SyncWeight(n.PassiveScore(), n.ActiveScore(), 0)
+	})
+}
+
+func clampFloat(v, min, max float64) float64 {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }

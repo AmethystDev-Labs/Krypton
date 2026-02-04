@@ -191,17 +191,19 @@ func (b *Balancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		proxy.Transport = &retryTransport{base: baseTransport(node.Proxy), retry: retryCfg}
 
+		b.adjustConn(node, 1)
 		proxy.ServeHTTP(rw, req)
+		b.adjustConn(node, -1)
 		if atomic.LoadInt32(&failed) == 0 {
 			status := int(atomic.LoadInt32(&respStatus))
 			if status >= 500 && status < 600 {
 				if status == http.StatusInternalServerError || status == http.StatusNotImplemented {
-					node.UpdatePassiveScore(-5)
-					node.SyncWeight(node.PassiveScore(), node.ActiveScore())
+					node.UpdatePassiveScore(-5, b.config.Strategy.MaxPenaltyPerSecond)
+					node.SyncWeight(node.PassiveScore(), node.ActiveScore(), node.ConnDelta())
 				}
 			} else {
-				node.UpdatePassiveScore(5)
-				node.SyncWeight(node.PassiveScore(), node.ActiveScore())
+				node.UpdatePassiveScore(5, b.config.Strategy.MaxPenaltyPerSecond)
+				node.SyncWeight(node.PassiveScore(), node.ActiveScore(), node.ConnDelta())
 			}
 			logRequest(r, status, time.Since(start), recorder, reqID, node.ID)
 			return
@@ -276,12 +278,12 @@ func (b *Balancer) runTriggerOnResponse(r *http.Request, status int, body []byte
 		node.SetPassiveScore(*result.Score)
 	}
 	if result.Penalty != nil {
-		node.UpdatePassiveScore(-*result.Penalty)
+		node.UpdatePassiveScore(-*result.Penalty, b.config.Strategy.MaxPenaltyPerSecond)
 	}
 	if result.Reward != nil {
-		node.UpdatePassiveScore(*result.Reward)
+		node.UpdatePassiveScore(*result.Reward, b.config.Strategy.MaxPenaltyPerSecond)
 	}
-	node.SyncWeight(node.PassiveScore(), node.ActiveScore())
+	node.SyncWeight(node.PassiveScore(), node.ActiveScore(), node.ConnDelta())
 	if result.Message != "" {
 		Infof("trigger applied request_id=%s node=%s msg=%s", r.Header.Get("X-Request-Id"), node.ID, result.Message)
 	}
@@ -304,15 +306,15 @@ func headerToMap(h http.Header) map[string]string {
 func (b *Balancer) handleError(node *Node, err error) {
 	switch {
 	case isUpstreamRetryable(err):
-		node.UpdatePassiveScore(-20)
+		node.UpdatePassiveScore(-20, b.config.Strategy.MaxPenaltyPerSecond)
 	case isTimeout(err):
-		node.UpdatePassiveScore(-30)
+		node.UpdatePassiveScore(-30, b.config.Strategy.MaxPenaltyPerSecond)
 	case isConnError(err):
-		node.UpdatePassiveScore(-50)
+		node.UpdatePassiveScore(-50, b.config.Strategy.MaxPenaltyPerSecond)
 	default:
-		node.UpdatePassiveScore(-15)
+		node.UpdatePassiveScore(-15, b.config.Strategy.MaxPenaltyPerSecond)
 	}
-	node.SyncWeight(node.PassiveScore(), node.ActiveScore())
+	node.SyncWeight(node.PassiveScore(), node.ActiveScore(), node.ConnDelta())
 }
 
 func isTimeout(err error) bool {

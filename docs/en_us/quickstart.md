@@ -6,5 +6,5 @@
 
 ```powershell
 Copy-Item example.config.toml config.toml
-C:\Users\liu_q\sdk\go1.25.0\bin\go.exe run .
+go run .
 ```

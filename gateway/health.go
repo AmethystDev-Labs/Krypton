@@ -67,7 +67,7 @@ func (h *HealthChecker) runOnce(ctx context.Context) {
 				}
 			}
 			node.SetActiveScore(score)
-			node.SyncWeight(node.PassiveScore(), node.ActiveScore())
+			node.SyncWeight(node.PassiveScore(), node.ActiveScore(), node.ConnDelta())
 			Infof("health check ok node=%s score=%d passive=%.0f active=%.0f", node.ID, score, node.PassiveScore(), node.ActiveScore())
 		}(n)
 	})
