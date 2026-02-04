@@ -37,11 +37,26 @@ jobs:
           fi
           mkdir -p dist
           go build -trimpath -ldflags "-s -w" -o "dist/krypton_${{ matrix.goos }}_${{ matrix.goarch }}${ext}" .
+      - name: Package
+        shell: bash
+        run: |
+          ext=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            ext=".exe"
+          fi
+          pkg="krypton_${{ matrix.goos }}_${{ matrix.goarch }}"
+          staging="dist/${pkg}"
+          mkdir -p "${staging}"
+          cp "dist/${pkg}${ext}" "${staging}/"
+          cp "example.config.toml" "${staging}/"
+          cp "example.config.toml" "${staging}/config.toml"
+          cp -R "scripts" "${staging}/"
+          (cd dist && zip -r "${pkg}.zip" "${pkg}")
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: krypton_${{ matrix.goos }}_${{ matrix.goarch }}
-          path: dist/krypton_${{ matrix.goos }}_${{ matrix.goarch }}*
+          path: dist/krypton_${{ matrix.goos }}_${{ matrix.goarch }}.zip
           if-no-files-found: error
 
   release:
